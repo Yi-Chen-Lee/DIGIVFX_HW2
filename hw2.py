@@ -211,7 +211,7 @@ def get_MSOP_descripters(src_img, feature_pos, Ix, Iy):
         patch_40 = get_patches(rotated_img, pos)
         # if i == 0:
         #     cv2.imwrite(f'results/40_test.png', patch_40)
-        gauss_patch_40 = gaussian_filter(patch_40, sigma=4.5) # sigma = 4.5?
+        gauss_patch_40 = gaussian_filter(patch_40, sigma=1) # sigma = 4.5?
         patch_8 = cv2.resize(gauss_patch_40, (8, 8))
         # if i == 0:
         #     cv2.imwrite(f'results/8_test.png', patch_8)
@@ -252,11 +252,24 @@ def match_feature(desc_right, desc_left, thresh_hold = 0.8):
 # matched_indexes = match_feature(desc_right_list1, desc_left_list2)
 # print(matched_indexes)
 # print(len(matched_indexes))
+def warp_feature(h, w, desc_list, focal=1800):
+    y_origin = h // 2
+    x_origin = w // 2
+    numm_descs = len(desc_list)
+    for i in range(numm_descs):
+        print("original", desc_list[i]["coordinate"])
+        x_prime = math.atan(((desc_list[i]["coordinate"][1] - x_origin) / focal)) * focal + x_origin
+        y_prime =  focal * (desc_list[i]["coordinate"][0] - y_origin) /\
+        math.sqrt((desc_list[i]["coordinate"][1] - x_origin)**2 + focal**2)+ y_origin
+        desc_list[i]["coordinate"] = (round(y_prime), round(x_prime))
+        print("after", (round(y_prime), round(x_prime)))
+    return
+ransac_list = []
 def ransac(desc_right, desc_left, matched_indexes):
     max_inlier = 0
     shift_xy = []
     for i in range(100000):
-        num_chosen = 2
+        num_chosen = 1
         chosen = random.sample(matched_indexes, k=num_chosen)
         # if i == 0:
         #     print("chosen", chosen)
@@ -269,17 +282,26 @@ def ransac(desc_right, desc_left, matched_indexes):
         curr_shift[1] /= num_chosen
         # print(curr_shift)
         curr_inlier = 0
-        for i, j in matched_indexes:
+        choosed = []
+        for g, h in matched_indexes:
             # print(i, j)
-            if [i, j] not in chosen:
-                other_shift = [desc_right[i]["coordinate"][0] - desc_left[j]["coordinate"][0], \
-                               desc_right[i]["coordinate"][1] - desc_left[j]["coordinate"][1]]
-                if abs(curr_shift[0] - other_shift[0]) < 8 and abs(curr_shift[1] - other_shift[1]) < 8:
+            if [g, h] not in chosen:
+                other_shift = [desc_right[g]["coordinate"][0] - desc_left[h]["coordinate"][0], \
+                               desc_right[g]["coordinate"][1] - desc_left[h]["coordinate"][1]]
+                if abs(curr_shift[0] - other_shift[0]) < 4 and abs(curr_shift[1] - other_shift[1]) < 4:
                     curr_inlier += 1
+                    choosed.append([g, h])
         # print(curr_inlier)
         if max_inlier < curr_inlier:
             max_inlier = curr_inlier
+            for g, h in choosed:
+                curr_shift[0] += desc_right[g]["coordinate"][0] - desc_left[h]["coordinate"][0]
+                curr_shift[1] += desc_right[g]["coordinate"][1] - desc_left[h]["coordinate"][1]
+            curr_shift[0] /= (max_inlier + 1)
+            curr_shift[1] /= (max_inlier + 1)
             shift_xy = curr_shift
+            global ransac_list
+            ransac_list = choosed
             # print(curr_shift)
     # print(shift_xy)
     shift_xy[0] = round(shift_xy[0])
@@ -329,16 +351,57 @@ def image_stitching(stitching_space, images, all_shifts):
             elif (images[i + 1][h // 2, (j - cumulated_shifts[1]), 1] == 0):
                 pass
             else:
+                # if (stitching_space[start_row:end_row, (j - 1), :].shape != images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :].shape):
                 stitching_space[start_row:end_row, (j - 1), :] = \
-                stitching_space[start_row:end_row, (j - 1), :] / overlapped_col * left_part \
-                +images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :] / overlapped_col * right_part 
+                stitching_space[start_row:end_row, (j - 1), :]  / overlapped_col * left_part + \
+                images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :] / overlapped_col * right_part
             left_part -= 1
             right_part += 1
         stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
         images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
         cumulated_h += all_shifts[i][0]
         cumulated_w += all_shifts[i][1]
-        print("end 1")
+        print(f"end {i}")
+    return stitching_space.astype(np.uint8)
+
+def image_stitching2(stitching_space, images, all_shifts):
+    cumulated_shifts = [0, 0]
+    cumulated_h, cumulated_w, temp_c = images[0].shape
+    num_images = len(images)
+    stitching_space[:images[0].shape[0], :images[0].shape[1],:] = images[0]
+    for i in range(num_images - 1):
+        # print(i)
+        cumulated_shifts[0] = cumulated_shifts[0] + all_shifts[i][0]
+        cumulated_shifts[1] = cumulated_shifts[1] + all_shifts[i][1]
+        overlapped_col = cumulated_w - cumulated_shifts[1]
+        left_part = overlapped_col - 1
+        right_part = 1 
+        h, w, c = images[i + 1].shape
+        if cumulated_shifts[0] >= 0:
+            start_row = cumulated_shifts[0]  
+            end_row = h + start_row
+        else:
+            start_row = 0
+            end_row = h + cumulated_shifts[0]
+
+        if cumulated_shifts[0] >= 0:
+            im_start_row = 0
+        else:
+            im_start_row = -cumulated_shifts[0]
+        
+        for j in range(cumulated_shifts[1], cumulated_w):
+            if (j > (cumulated_shifts[1] + cumulated_w) / 2):
+                stitching_space[start_row:end_row, (j - 1), :] = images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :]
+            # else:
+            #     stitching_space[start_row:end_row, (j - 1), :] = \
+            #     stitching_space[start_row:end_row, (j - 1), :]
+            left_part -= 1
+            right_part += 1
+        stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
+        images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
+        cumulated_h += all_shifts[i][0]
+        cumulated_w += all_shifts[i][1]
+        print(f"end {i}")
     return stitching_space.astype(np.uint8)
 
 # all_shifts = []
@@ -356,9 +419,9 @@ bgr1 = cv2.imread(f"{filename1}.jpg")
 bgr2 = cv2.imread(f"{filename2}.jpg")
 bgr3 = cv2.imread(f"{filename3}.jpg")
 
-warp_1 = cylinder_warping2(bgr1, filename1, focal=3086) 
-warp_2 = cylinder_warping2(bgr2, filename2, focal=3083) 
-warp_3 = cylinder_warping2(bgr3, filename3, focal=3087)
+warp_1 = cylinder_warping2(bgr1, filename1, focal=3085.73) # 776.419
+warp_2 = cylinder_warping2(bgr2, filename2, focal=3082.65) # 776.035
+warp_3 = cylinder_warping2(bgr3, filename3, focal=3087.25) # 777.776
 
 cv2.imwrite(f'results/{filename1}_wrap_test.png', warp_1)
 cv2.imwrite(f'results/{filename2}_wrap_test.png', warp_2)
@@ -408,11 +471,11 @@ fpts3 = find_local_max_R(R3)
 # h1, w1 = gray1.shape
 # h2, w2 = gray2.shape
 
-# img_fps1 = np.copy(gray1)
+# img_fps1 = np.copy(bgr1)
 # for i in range(len(fpts1[0])):
 #     cv2.circle(img_fps1, (fpts1[1][i], fpts1[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
 
-# img_arrows1 = np.copy(gray1)
+# img_arrows1 = np.copy(bgr1)
     
 # for i in range(len(fpts1[0])):
 #     x = fpts1[1][i]
@@ -424,11 +487,11 @@ fpts3 = find_local_max_R(R3)
 # cv2.imwrite(f'results/{filename1}_fps.png', img_fps1)
 # cv2.imwrite(f'results/{filename1}_arrows.png', img_arrows1)
 
-# img_fps2 = np.copy(gray2)
+# img_fps2 = np.copy(bgr2)
 # for i in range(len(fpts2[0])):
 #     cv2.circle(img_fps2, (fpts2[1][i], fpts2[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
 
-# img_arrows2 = np.copy(gray2)
+# img_arrows2 = np.copy(bgr2)
     
 # for i in range(len(fpts2[0])):
 #     x = fpts2[1][i]
@@ -447,25 +510,53 @@ desc_left_list1, desc_right_list1 = get_MSOP_descripters(bgr1, fpts1, Ix1, Iy1)
 desc_left_list2, desc_right_list2 = get_MSOP_descripters(bgr2, fpts2, Ix2, Iy2)
 desc_left_list3, desc_right_list3 = get_MSOP_descripters(bgr3, fpts3, Ix3, Iy3)
 
-match_feature12 = match_feature(desc_right_list1, desc_left_list2)
-match_feature23 = match_feature(desc_right_list2, desc_left_list3)
+# desc_left_list1, desc_right_list1 = get_MSOP_descripters(warp_1, fpts1, Ix1, Iy1)
+# desc_left_list2, desc_right_list2 = get_MSOP_descripters(warp_2, fpts2, Ix2, Iy2)
+# desc_left_list3, desc_right_list3 = get_MSOP_descripters(warp_3, fpts3, Ix3, Iy3)
 
-print(match_feature12)
-print(match_feature23)
+test_height = bgr1.shape[0]
+test_width = bgr1.shape[1]
+warp_feature(test_height, test_width, desc_left_list1, focal=3085.73)
+warp_feature(test_height, test_width, desc_left_list2, focal=3082.65)
+warp_feature(test_height, test_width, desc_left_list3, focal=3087.25)
+warp_feature(test_height, test_width, desc_right_list1, focal=3085.73)
+warp_feature(test_height, test_width, desc_right_list2, focal=3082.65)
+warp_feature(test_height, test_width, desc_right_list3, focal=3087.25)
 
+match_feature12 = match_feature(desc_right_list1, desc_left_list2, thresh_hold=1)
 all_shifts = []
 all_shifts.append(ransac(desc_right_list1, desc_left_list2, match_feature12))
+###########################################
+img_fps1 = np.copy(warp_1)
+for i in ransac_list:
+    cv2.circle(img_fps1, (desc_right_list1[i[0]]["coordinate"][1], desc_right_list1[i[0]]["coordinate"][0]), radius=5, color=[0, 0, 255], thickness=1, lineType=1)
+cv2.imwrite(f'results/see/{filename1}_fps.png', img_fps1)
+
+img_fps2 = np.copy(warp_2)
+for i in ransac_list:
+    cv2.circle(img_fps2, (desc_left_list2[i[1]]["coordinate"][1], desc_left_list2[i[1]]["coordinate"][0]), radius=5, color=[0, 0, 255], thickness=1, lineType=1)
+cv2.imwrite(f'results/see/{filename2}_fps.png', img_fps2)
+###########################################
+print("len_ransac", len(ransac_list))
+match_feature23 = match_feature(desc_right_list2, desc_left_list3, thresh_hold=1)
 all_shifts.append(ransac(desc_right_list2, desc_left_list3, match_feature23))
+
+# print(match_feature12)
+# print(match_feature23)
+
 
 print(all_shifts)
 
-total_shifts = [0, 0]
+max_shifts = [0, 0]
 for i, j in all_shifts:
-    total_shifts[0] += i
-    total_shifts[1] += j
-print(total_shifts)
-stitching_space = init_stitching_space([warp_1, warp_2, warp_3], total_shifts)
-stitched = image_stitching(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
+    max_shifts[0] += max(max_shifts[0], i)
+    max_shifts[1] += max(max_shifts[1], j)
+print(max_shifts)
+# stitching_space = init_stitching_space([warp_1, warp_2, warp_3], max_shifts)
+# stitched = image_stitching(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
+stitching_space = init_stitching_space([bgr1, bgr2, bgr3], max_shifts)
+stitched = image_stitching2(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
+
 cv2.imwrite(f'results/stitched_test.png', stitched)
 
 def bundle_adjustment(stitched):
