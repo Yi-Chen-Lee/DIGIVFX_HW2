@@ -1,3 +1,5 @@
+# reference https://github.com/qhan1028/Image-Stitching/tree/ae88b023ead6c86cb56cc216bd353fe7f9b260a0
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +8,7 @@ import pandas as pd
 from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter
 import random
+from scipy import signal
 
 # filename1 = 'grail1'
 # bgr1 = cv2.imread(f'{filename1}.jpg')
@@ -107,35 +110,56 @@ def calculate_R(gray, ksize=9, S=3, k=0.04):
 
     return R, Ix, Iy, Ix2, Iy2
 
+# def local_max_R(R, thres=0.01):
+#     print('Calculating local max')
+#     kernels = []
+#     for y in range(3):
+#         for x in range(3):
+#             if x == 1 and y == 1: continue
+#             k = np.zeros((3, 3), dtype=np.float32)
+#             k[1, 1] = 1
+#             k[y, x] = -1
+#             kernels.append(k)
+
+#     localMax = np.ones(R.shape, dtype=np.uint8)
+#     localMax[R <= np.max(R) * thres] = 0
+
+#     filtered_images = []
+
+#     for k in kernels:
+#         d = np.zeros(R.shape, dtype=np.float32)
+#         for i in range(1, R.shape[0]-1):
+#             for j in range(1, R.shape[1]-1):
+#                 d[i, j] = np.sum(R[i-1:i+2, j-1:j+2] * k)
+#         filtered_images.append(d)
+
+#     for d in filtered_images:
+#         d[d < 0] = 0
+#         localMax &= np.uint8(np.sign(d))
+
+#     print('# corners:', np.sum(localMax))
+#     feature_points = np.where(localMax > 0)
+    
+#     return feature_points
+
 def local_max_R(R, thres=0.01):
     print('Calculating local max')
-    kernels = []
-    for y in range(3):
-        for x in range(3):
-            if x == 1 and y == 1: continue
-            k = np.zeros((3, 3), dtype=np.float32)
-            k[1, 1] = 1
-            k[y, x] = -1
-            kernels.append(k)
 
-    localMax = np.ones(R.shape, dtype=np.uint8)
-    localMax[R <= np.max(R) * thres] = 0
+    # create a single kernel
+    kernel = np.ones((3, 3), dtype=np.float32) * -1
+    kernel[1, 1] = 8
 
-    filtered_images = []
+    # apply thresholding to the input image
+    localMax = R > np.max(R) * thres
 
-    for k in kernels:
-        d = np.zeros(R.shape, dtype=np.float32)
-        for i in range(1, R.shape[0]-1):
-            for j in range(1, R.shape[1]-1):
-                d[i, j] = np.sum(R[i-1:i+2, j-1:j+2] * k)
-        filtered_images.append(d)
+    # perform convolution using the kernel
+    filtered_image = np.abs(signal.convolve2d(localMax, kernel, mode='same'))
 
-    for d in filtered_images:
-        d[d < 0] = 0
-        localMax &= np.uint8(np.sign(d))
+    # find local maxima in the filtered image
+    localMax = (filtered_image == np.max(filtered_image))
 
     print('# corners:', np.sum(localMax))
-    feature_points = np.where(localMax > 0)
+    feature_points = np.argwhere(localMax)
     
     return feature_points
 
@@ -257,12 +281,12 @@ def warp_feature(h, w, desc_list, focal=1800):
     x_origin = w // 2
     numm_descs = len(desc_list)
     for i in range(numm_descs):
-        print("original", desc_list[i]["coordinate"])
+        #print("original", desc_list[i]["coordinate"])
         x_prime = math.atan(((desc_list[i]["coordinate"][1] - x_origin) / focal)) * focal + x_origin
         y_prime =  focal * (desc_list[i]["coordinate"][0] - y_origin) /\
         math.sqrt((desc_list[i]["coordinate"][1] - x_origin)**2 + focal**2)+ y_origin
         desc_list[i]["coordinate"] = (round(y_prime), round(x_prime))
-        print("after", (round(y_prime), round(x_prime)))
+        #print("after", (round(y_prime), round(x_prime)))
     return
 ransac_list = []
 def ransac(desc_right, desc_left, matched_indexes):
@@ -318,6 +342,7 @@ def init_stitching_space(images, total_shifts):
     if total_shifts[0] > 0:
         h += total_shifts[0] # might need to check this
     w += total_shifts[1]
+    print('init_snitch h w c', h, w, c)
     return np.zeros((h, w, c), dtype=np.uint8)
 
 def image_stitching(stitching_space, images, all_shifts):
@@ -404,6 +429,84 @@ def image_stitching2(stitching_space, images, all_shifts):
         print(f"end {i}")
     return stitching_space.astype(np.uint8)
 
+# def image_stitching3(stitching_space, images, all_shifts):
+#     cumulated_shifts = [0, 0]
+#     cumulated_h, cumulated_w, temp_c = images[0].shape
+#     num_images = len(images)
+#     stitching_space[:images[0].shape[0], :images[0].shape[1],:] = images[0]
+#     overlap_area = []        
+#     overlap_img = []
+#     for i in range(num_images - 1):
+#         # print(i)
+#         cumulated_shifts[0] = cumulated_shifts[0] + all_shifts[i][0]
+#         cumulated_shifts[1] = cumulated_shifts[1] + all_shifts[i][1]
+#         overlapped_col = cumulated_w - cumulated_shifts[1]
+#         left_part = overlapped_col - 1
+#         right_part = 1 
+#         h, w, c = images[i + 1].shape
+#         if cumulated_shifts[0] >= 0:
+#             start_row = cumulated_shifts[0]  
+#             end_row = h + start_row
+#         else:
+#             start_row = 0
+#             end_row = h + cumulated_shifts[0]
+
+#         if cumulated_shifts[0] >= 0:
+#             im_start_row = 0
+#         else:
+#             im_start_row = -cumulated_shifts[0]
+        
+#         for j in range(cumulated_shifts[1], cumulated_w):
+#             if (j > (cumulated_shifts[1] + cumulated_w) / 2):
+#                 stitching_space[start_row:end_row, (j - 1), :] = images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :]
+#             # else:
+#             #     stitching_space[start_row:end_row, (j - 1), :] = \
+#             #     stitching_space[start_row:end_row, (j - 1), :]
+#             left_part -= 1
+#             right_part += 1
+#         stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
+#         images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
+#         cumulated_h += all_shifts[i][0]
+#         cumulated_w += all_shifts[i][1]
+#         overlap_area.append((start_row,end_row, cumulated_shifts[1], cumulated_w))
+#         overlap_img.append(images[i][])
+#         print(f"end {i}")
+
+#     for i in range(num_images - 1):
+#         cumulated_shifts[0] = cumulated_shifts[0] + all_shifts[i][0]
+#         cumulated_shifts[1] = cumulated_shifts[1] + all_shifts[i][1]
+#         print(i, 'shift', cumulated_shifts[0], cumulated_shifts[1])
+#         h, w, c = images[i + 1].shape
+#         if cumulated_shifts[0] >= 0:
+#             start_row = cumulated_shifts[0]  
+#             end_row = h + start_row
+#         else:
+#             start_row = 0
+#             end_row = h + cumulated_shifts[0]
+
+#         if cumulated_shifts[0] >= 0:
+#             im_start_row = 0
+#         else:
+#             im_start_row = -cumulated_shifts[0]
+        
+#         print('cumulated_w', cumulated_w)
+#         print('concate len', cumulated_shifts[1]+w-cumulated_w)
+#         stitching_space[start_row:end_row, cumulated_shifts[1]+99:cumulated_shifts[1]+w-1, :] = images[i+1][im_start_row:,100:, :]
+#         # for j in range(cumulated_shifts[1], cumulated_w):
+#         #     if (j > (cumulated_shifts[1] + cumulated_w) / 2):
+#         #         stitching_space[start_row:end_row, (j - 1), :] = images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :]
+#             # else:
+#             #     stitching_space[start_row:end_row, (j - 1), :] = \
+#             #     stitching_space[start_row:end_row, (j - 1), :]
+#         # overlap_area.append()
+#         # stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
+#         # images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
+#         cumulated_h += all_shifts[i][0]
+#         cumulated_w += all_shifts[i][1]
+#         print(f"end {i}")
+#     return stitching_space.astype(np.uint8)
+
+
 # all_shifts = []
 # all_shifts.append(shift_xy)
 # stitching_space = init_stitching_space([warp_1, warp_2], shift_xy)
@@ -457,7 +560,7 @@ def find_local_max_R(R, rthres=0.01):
         d[d < 0] = 0
         localMax &= np.uint8(d)
 
-    print('found corners:', np.sum(localMax))
+    print('# corners:', np.sum(localMax))
     feature_points = np.where(localMax > 0)
     
     return feature_points
@@ -559,5 +662,73 @@ stitched = image_stitching2(stitching_space, [warp_1, warp_2, warp_3], all_shift
 
 cv2.imwrite(f'results/stitched_test.png', stitched)
 
-def bundle_adjustment(stitched):
-    return    
+def find_range(array):
+    sum_x = np.sum(array, axis=0)
+    sum_y = np.sum(array, axis=1)
+    
+    index_x = np.where(sum_x > 0)[0]
+    sx = index_x[0]
+    ex = index_x[-1] + 1 # slicing
+    index_y = np.where(sum_y > 0)[0]
+    sy = index_y[0]
+    ey = index_y[-1] + 1 # slicing
+    
+    return sx, ex, sy, ey
+
+def bundle_adjust(img):
+    h, w, _ = img.shape
+    img_gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    
+    for x in range(0, w):
+        find = False
+        for y in range(0, h):
+            if img_gray[y, x] > 0:
+                upper_left = [x, y]
+                find = True
+                break
+        if find:
+            break
+
+    for x in range(0, w):
+        find = False
+        for y in range(h - 1, -1, -1):
+            if img_gray[y, x] > 0:
+                bottom_left = [x, y]
+                find = True
+                break
+        if find:
+            break
+
+    for x in range(w-1, -1, -1):
+        find = False
+        for y in range(0, h):
+            if img_gray[y, x] > 0:
+                upper_right = [x, y]
+                find = True
+                break
+        if find:
+            break
+
+    for x in range(w-1, -1, -1):
+        find = False
+        for y in range(h-1, -1, -1):
+            if img_gray[y, x] > 0:
+                bottom_right = [x, y]
+                find = True
+                break
+        if find:
+            break
+
+    corner = np.float32([upper_left, upper_right, bottom_left, bottom_right])
+    img_corner = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+    
+    M = cv2.getPerspectiveTransform(corner, img_corner)
+    pano_adjust = cv2.warpPerspective(img, M, (w, h))
+
+    return pano_adjust
+
+
+bundle = bundle_adjust(stitched)
+
+cv2.imwrite(f'results/bundle.png', bundle)
+
