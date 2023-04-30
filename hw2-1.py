@@ -11,7 +11,7 @@ import random
 from scipy import signal
 import os.path as osp
 import os
-
+from scipy.ndimage.filters import maximum_filter
 
 # filename1 = 'grail1'
 # bgr1 = cv2.imread(f'{filename1}.jpg')
@@ -257,22 +257,44 @@ def get_MSOP_descripters(src_img, feature_pos, Ix, Iy):
 # print(desc_left_list, desc_right_list)
 
 def match_feature(desc_right, desc_left, thresh_hold = 0.8):
-    img1_right_desc = pd.DataFrame(desc_right)
-    img2_left_desc = pd.DataFrame(desc_left)
-    img1_all_right_patches = img1_right_desc.loc[:]["patch"].tolist()
-    img2_all_left_patches = img2_left_desc.loc[:]["patch"].tolist()
-    # print(img1_all_right_patches[0])
+    img1_all_right_patches = []
+    img2_all_left_patches = []
+    for desc in desc_right:
+        img1_all_right_patches.append(desc["patch"])
+    for desc in desc_left:
+        img2_all_left_patches.append(desc["patch"])
     all_combination_dist = cdist(img1_all_right_patches, img2_all_left_patches)
-    sorted_index = np.argsort(all_combination_dist, axis=1)
+    # print("img1_len", len(desc_right))
+    # print("img2_len", len(desc_left))
+    # print("combination shape", all_combination_dist.shape)
+    num_desc_right = len(desc_right)
+    num_desc_left = len(desc_left)
+    all_fs_matches = []
+    for i in range(num_desc_right):
+        first_closest_index = 0
+        second_closest_index = 0
+        first_closest_dist = float("inf")
+        second_closest_dist = float("inf")
+        for j in range(num_desc_left):
+            if all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] < first_closest_dist:
+                second_closest_dist = first_closest_dist
+                second_closest_index = first_closest_index
+                first_closest_dist = all_combination_dist[i, j]
+                first_closest_index = (i, j)
+            elif all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] >= first_closest_dist:
+                second_closest_dist = all_combination_dist[i, j]
+                second_closest_index = (i, j)
+        all_fs_matches.append((first_closest_index, second_closest_index))
     # print(sorted_index)
     # print(len(sorted_index))
     # print(len(sorted_index[0]))
     matched_indexes = []
-    for i, j in enumerate(sorted_index):
-        first_closest = all_combination_dist[i, j[0]]
-        second_closest = all_combination_dist[i, j[1]]
+    for fs in all_fs_matches:
+        # print("fs is", fs)
+        first_closest = all_combination_dist[fs[0][0], fs[0][1]]
+        second_closest = all_combination_dist[fs[1][0], fs[1][1]]
         if first_closest / second_closest < thresh_hold:
-            matched_indexes.append([i, j[0]])
+            matched_indexes.append(fs[0])
     return matched_indexes
 
 # matched_indexes = match_feature(desc_right_list1, desc_left_list2)
@@ -436,13 +458,13 @@ filenames = []
 bgrs = []
 
 focals = [3085.73, 3082.65, 3087.25]
-
-dir = 'pictures2'
+# focals = [3995.11, 3995.59, 3996.06, 3987.76, 3974.09]
+dir = 'pictures'
 
 for filename in np.sort(os.listdir(dir)):
     if osp.splitext(filename)[1] in ['.png', '.jpg']:
         print(filename)
-        filenames.append(filename)
+        filenames.append(filename[:-4])
         im = cv2.imread(osp.join(dir, filename))
         bgrs.append(im) 
 
@@ -464,23 +486,19 @@ for i in range(n):
     Iy.append(iy)
 
 def find_local_max_R(R, rthres=0.01):
-    kernels = []
+
+    localMax = np.zeros(R.shape, dtype=np.uint8)
+    localMax[R > np.max(R) * rthres] = 1
+
     for y in range(3):
         for x in range(3):
-            if x == 1 and y == 1: continue
-            k = np.zeros((3, 3), dtype=np.float32)
-            k[1, 1] = 1
-            k[y, x] = -1
-            kernels.append(k)
-
-    localMax = np.ones(R.shape, dtype=np.uint8)
-    localMax[R <= np.max(R) * rthres] = 0
-
-    for k in kernels:
-        d = np.sign(cv2.filter2D(R, -1, k))
-        d[d < 0] = 0
-        localMax &= np.uint8(d)
-
+            if x == 1 and y == 1:
+                continue
+            kernels = np.zeros((3, 3))
+            kernels[1, 1] = 1
+            kernels[y, x] = -1
+            result = cv2.filter2D(R, -1, kernels)
+            localMax[result < 0] = 0 
     print('# corners:', np.sum(localMax))
     feature_points = np.where(localMax > 0)
     
@@ -524,22 +542,10 @@ print(max_shifts)
 # stitched = image_stitching(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
 
 stitching_space = init_stitching_space(bgrs, max_shifts)
-stitched = image_stitching2(stitching_space, warp, all_shifts)
-
-cv2.imwrite(f'results/stitched.png', stitched)
-
-def find_range(array):
-    sum_x = np.sum(array, axis=0)
-    sum_y = np.sum(array, axis=1)
-    
-    index_x = np.where(sum_x > 0)[0]
-    sx = index_x[0]
-    ex = index_x[-1] + 1 # slicing
-    index_y = np.where(sum_y > 0)[0]
-    sy = index_y[0]
-    ey = index_y[-1] + 1 # slicing
-    
-    return sx, ex, sy, ey
+stitched_linear_blending = image_stitching(stitching_space, warp, all_shifts)
+stitched_no_blending = image_stitching2(stitching_space, warp, all_shifts)
+cv2.imwrite(f'results/linear_blending.png', stitched_linear_blending)
+cv2.imwrite(f'results/no_blending.png', stitched_no_blending)
 
 def bundle_adjust(img):
     h, w, _ = img.shape
@@ -594,7 +600,7 @@ def bundle_adjust(img):
     return pano_adjust
 
 
-bundle = bundle_adjust(stitched)
+bundle = bundle_adjust(stitched_no_blending)
 
-cv2.imwrite(f'results/bundle.png', bundle)
+cv2.imwrite(f'results/result.png', bundle)
 
