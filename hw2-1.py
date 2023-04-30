@@ -4,7 +4,6 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-import pandas as pd
 from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter
 import random
@@ -257,22 +256,44 @@ def get_MSOP_descripters(src_img, feature_pos, Ix, Iy):
 # print(desc_left_list, desc_right_list)
 
 def match_feature(desc_right, desc_left, thresh_hold = 0.8):
-    img1_right_desc = pd.DataFrame(desc_right)
-    img2_left_desc = pd.DataFrame(desc_left)
-    img1_all_right_patches = img1_right_desc.loc[:]["patch"].tolist()
-    img2_all_left_patches = img2_left_desc.loc[:]["patch"].tolist()
-    # print(img1_all_right_patches[0])
+    img1_all_right_patches = []
+    img2_all_left_patches = []
+    for desc in desc_right:
+        img1_all_right_patches.append(desc["patch"])
+    for desc in desc_left:
+        img2_all_left_patches.append(desc["patch"])
     all_combination_dist = cdist(img1_all_right_patches, img2_all_left_patches)
-    sorted_index = np.argsort(all_combination_dist, axis=1)
+    # print("img1_len", len(desc_right))
+    # print("img2_len", len(desc_left))
+    # print("combination shape", all_combination_dist.shape)
+    num_desc_right = len(desc_right)
+    num_desc_left = len(desc_left)
+    all_fs_matches = []
+    for i in range(num_desc_right):
+        first_closest_index = 0
+        second_closest_index = 0
+        first_closest_dist = float("inf")
+        second_closest_dist = float("inf")
+        for j in range(num_desc_left):
+            if all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] < first_closest_dist:
+                second_closest_dist = first_closest_dist
+                second_closest_index = first_closest_index
+                first_closest_dist = all_combination_dist[i, j]
+                first_closest_index = (i, j)
+            elif all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] >= first_closest_dist:
+                second_closest_dist = all_combination_dist[i, j]
+                second_closest_index = (i, j)
+        all_fs_matches.append((first_closest_index, second_closest_index))
     # print(sorted_index)
     # print(len(sorted_index))
     # print(len(sorted_index[0]))
     matched_indexes = []
-    for i, j in enumerate(sorted_index):
-        first_closest = all_combination_dist[i, j[0]]
-        second_closest = all_combination_dist[i, j[1]]
+    for fs in all_fs_matches:
+        # print("fs is", fs)
+        first_closest = all_combination_dist[fs[0][0], fs[0][1]]
+        second_closest = all_combination_dist[fs[1][0], fs[1][1]]
         if first_closest / second_closest < thresh_hold:
-            matched_indexes.append([i, j[0]])
+            matched_indexes.append(fs[0])
     return matched_indexes
 
 # matched_indexes = match_feature(desc_right_list1, desc_left_list2)
