@@ -1,7 +1,9 @@
 # reference https://github.com/qhan1028/Image-Stitching/tree/ae88b023ead6c86cb56cc216bd353fe7f9b260a0
-
+# reference https://github.com/qa276390/image-stitching-msop
+# reference https://matplotlib.org/stable/gallery/userdemo/connect_simple01.html#sphx-glr-gallery-userdemo-connect-simple01-py
 import cv2
 import matplotlib.pyplot as plt
+from matplotlib.patches import ConnectionPatch
 import numpy as np
 import math
 from scipy.spatial.distance import cdist
@@ -11,45 +13,7 @@ from scipy import signal
 import os.path as osp
 import os
 
-# filename1 = 'grail1'
-# bgr1 = cv2.imread(f'{filename1}.jpg')
-# rgb1 = cv2.cvtColor(bgr1, cv2.COLOR_BGR2RGB)
-
-# # #print('bgr1 shape', bgr1.shape)
-
-# filename2 = 'grail2'
-# bgr2 = cv2.imread(f'{filename2}.jpg')
-# rgb2 = cv2.cvtColor(bgr2, cv2.COLOR_BGR2RGB)
-
-def cylinder_warping1(image, file_name, focal=1800):
-    print('Cylinder Warping1')
-    h, w, c = image.shape
-    print('h', h, 'w', w)
-    s = focal
-    res = np.zeros([h, w, 3])
-    y_origin = np.floor(h/2)
-    x_origin = np.floor(w/2)
-    
-    for c in  range(3):
-        for y_pic in range(h):
-            for x_pic in range(w):
-                y_prime = y_pic - y_origin
-                x_prime = x_pic - x_origin
-                x = focal * np.tan(x_prime/s)
-                y = np.sqrt(x**2 + focal**2) / s * y_prime
-                y += y_origin
-                x += x_origin
-                x_floor = min(max(int(np.floor(x)), 0), w-1)
-                y_floor = min(max(int(np.floor(y)), 0), h-1)
-                x_ceil = min(max(int(np.ceil(x)), 0), w-1)
-                y_ceil = min(max(int(np.ceil(y)), 0), h-1)
-                
-                a = x - x_floor
-                b = y - y_floor
-                print('prime', y_prime, x_prime, 'real', x, y, 'floor', y_floor, x_floor, 'ceiling', y_ceil, x_ceil)
-                res[y_pic][x_pic][c] = (1-a) * (1-b) * image[y_floor][x_floor][c] + a * (1-b) * image[y_floor][x_ceil][c] + a * b * image[y_ceil][x_ceil][c] + (1-a) * b * image[y_ceil][x_floor][c]
-          
-def cylinder_warping2(image, file_name, focal=1800):
+def cylinder_warping(image, file_name, focal=1800):
     print('Cylinder Warping2')
     h, w, c = image.shape
     print('h', h, 'w', w)
@@ -84,11 +48,6 @@ def cylinder_warping2(image, file_name, focal=1800):
     cv2.imwrite(f'results/{file_name}_warp.png', res)
     return res
 
-
-# warp_1 = cylinder_warping2(bgr1, filename1, 600)
-# # print("warpped shape", warp_1.shape)
-# warp_2 = cylinder_warping2(bgr2, filename2, 603)
-
 def calculate_R(gray, ksize=9, S=3, k=0.04):
     print('Calculating R')
     K = (ksize, ksize)
@@ -110,37 +69,6 @@ def calculate_R(gray, ksize=9, S=3, k=0.04):
     R = detM - k * (traceM ** 2)
 
     return R, Ix, Iy
-# def local_max_R(R, thres=0.01):
-#     print('Calculating local max')
-#     kernels = []
-#     for y in range(3):
-#         for x in range(3):
-#             if x == 1 and y == 1: continue
-#             k = np.zeros((3, 3), dtype=np.float32)
-#             k[1, 1] = 1
-#             k[y, x] = -1
-#             kernels.append(k)
-
-#     localMax = np.ones(R.shape, dtype=np.uint8)
-#     localMax[R <= np.max(R) * thres] = 0
-
-#     filtered_images = []
-
-#     for k in kernels:
-#         d = np.zeros(R.shape, dtype=np.float32)
-#         for i in range(1, R.shape[0]-1):
-#             for j in range(1, R.shape[1]-1):
-#                 d[i, j] = np.sum(R[i-1:i+2, j-1:j+2] * k)
-#         filtered_images.append(d)
-
-#     for d in filtered_images:
-#         d[d < 0] = 0
-#         localMax &= np.uint8(np.sign(d))
-
-#     print('# corners:', np.sum(localMax))
-#     feature_points = np.where(localMax > 0)
-    
-#     return feature_points
 
 def local_max_R(R, thres=0.01):
     print('Calculating local max')
@@ -162,56 +90,6 @@ def local_max_R(R, thres=0.01):
     feature_points = np.argwhere(localMax)
     
     return feature_points
-
-# gray1 = cv2.cvtColor(warp_1.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-# gray2 = cv2.cvtColor(warp_2.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-# h1, w1 = gray1.shape
-# h2, w2 = gray2.shape
-
-# R1, Ix1, Iy1, Ix21, Iy21 = calculate_R(gray1)
-# R2, Ix2, Iy2, Ix22, Iy22 = calculate_R(gray2)
-
-# fpts1 = local_max_R(R1)
-# fpts2 = local_max_R(R2)
-#print('len', len(fpts1))
-#print('points 0', fpts1[0][1], fpts1[0][0])
-# img_fps1 = np.copy(bgr1)
-# for i in range(len(fpts1[0])):
-#     cv2.circle(img_fps1, (fpts1[1][i], fpts1[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
-
-# img_arrows1 = np.copy(bgr1)
-    
-# for i in range(len(fpts1[0])):
-#     x = fpts1[1][i]
-#     y = fpts1[0][i]
-#     ex, ey = int(x + Ix1[y, x]*2), int(y + Iy1[y, x]*2)
-#     ex, ey = np.clip(ex, 0, w1), np.clip(ey, 0, h1)
-#     cv2.arrowedLine(img_arrows1, (x, y), (ex, ey), (0, 0, 255), 1)
-
-# cv2.imwrite(f'results/{filename1}_fps.png', img_fps1)
-# cv2.imwrite(f'results/{filename1}_arrows.png', img_arrows1)
-
-# img_fps2 = np.copy(bgr2)
-# for i in range(len(fpts2[0])):
-#     cv2.circle(img_fps2, (fpts2[1][i], fpts2[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
-
-# img_arrows2 = np.copy(bgr2)
-    
-# for i in range(len(fpts2[0])):
-#     x = fpts2[1][i]
-#     y = fpts2[0][i]
-#     ex, ey = int(x + Ix1[y, x]*2), int(y + Iy1[y, x]*2)
-#     ex, ey = np.clip(ex, 0, w1), np.clip(ey, 0, h1)
-#     cv2.arrowedLine(img_arrows2, (x, y), (ex, ey), (0, 0, 255), 1)
-
-# cv2.imwrite(f'results/{filename2}_fps.png', img_fps2)
-# cv2.imwrite(f'results/{filename2}_arrows.png', img_arrows2)
-
-# class MSOP_descripter():
-#     def __init__(self, coordinate, ori, patch):
-#         self.coordinate = coordinate
-#         self.ori = ori
-#         self.patch = patch
 
 def get_patches(rotated_img, pos):
     up = pos[0] - 20 if (pos[0] - 20) >= 0 else 0
@@ -249,10 +127,6 @@ def get_MSOP_descripters(src_img, feature_pos, Ix, Iy):
         else:
             desc_right_list.append(desc)
     return desc_left_list, desc_right_list
-
-# desc_left_list1, desc_right_list1 = get_MSOP_descripters(bgr1, fpts1, Ix1, Iy1)
-# desc_left_list2, desc_right_list2 = get_MSOP_descripters(bgr2, fpts2, Ix2, Iy2)
-# print(desc_left_list, desc_right_list)
 
 def match_feature(desc_right, desc_left, thresh_hold = 0.8):
     img1_all_right_patches = []
@@ -295,9 +169,6 @@ def match_feature(desc_right, desc_left, thresh_hold = 0.8):
             matched_indexes.append(fs[0])
     return matched_indexes
 
-# matched_indexes = match_feature(desc_right_list1, desc_left_list2)
-# print(matched_indexes)
-# print(len(matched_indexes))
 def warp_feature(h, w, desc_list, focal=1800):
     y_origin = h // 2
     x_origin = w // 2
@@ -354,10 +225,6 @@ def ransac(desc_right, desc_left, matched_indexes):
     shift_xy[1] = round(shift_xy[1])
     print("inliner num", max_inlier)
     return shift_xy
-
-# shift_xy = ransac(desc_right_list1, desc_left_list2, matched_indexes)
-# print(shift_xy)
-# print(warp_1.shape)
 
 def init_stitching_space(images, total_shifts):
     h, w, c = images[0].shape
@@ -472,7 +339,7 @@ print('files')
 for i in range(n):
     print(filenames[i])
 
-warp = [cylinder_warping2(bgrs[i], filenames[i], focal=focals[i]) for i in range(n)]
+warp = [cylinder_warping(bgrs[i], filenames[i], focal=focals[i]) for i in range(n)]
 
 grays = []
 
@@ -523,9 +390,6 @@ for i in range(n):
     left, right = get_MSOP_descripters(bgrs[i], fpts[i], Ix[i], Iy[i])
     desc_left_list.append(left)
     desc_right_list.append(right)
-# desc_left_list1, desc_right_list1 = get_MSOP_descripters(warp_1, fpts1, Ix1, Iy1)
-# desc_left_list2, desc_right_list2 = get_MSOP_descripters(warp_2, fpts2, Ix2, Iy2)
-# desc_left_list3, desc_right_list3 = get_MSOP_descripters(warp_3, fpts3, Ix3, Iy3)
 
 test_height = bgrs[0].shape[0]
 test_width = bgrs[0].shape[1]
@@ -538,7 +402,17 @@ matches = []
 all_shifts = []
 for i in range(n-1):
     matches.append(match_feature(desc_right_list[i], desc_left_list[i+1], thresh_hold=1))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
+    ax1.imshow(cv2.cvtColor(warp[i].astype(np.uint8), cv2.COLOR_BGR2RGB))
+    ax2.imshow(cv2.cvtColor(warp[i+1].astype(np.uint8), cv2.COLOR_BGR2RGB))
     all_shifts.append(ransac(desc_right_list[i], desc_left_list[i+1], matches[i]))
+    for match in ransac_list:
+        con = ConnectionPatch(xyA=(desc_left_list[i+1][match[1]]["coordinate"][1], desc_left_list[i+1][match[1]]["coordinate"][0]), \
+                              xyB=(desc_right_list[i][match[0]]["coordinate"][1], desc_right_list[i][match[0]]["coordinate"][0]), \
+                              coordsA="data", coordsB="data", \
+                              axesA=ax2, axesB=ax1, color=(random.uniform(0, 1), random.uniform(0, 1), random.uniform(0, 1)))
+        fig.add_artist(con)
+    plt.savefig(f'results/{filenames[i]}_{filenames[i+1]}_lines.png')
 print(all_shifts)
 
 max_shifts = [0, 0]
@@ -546,8 +420,6 @@ for i, j in all_shifts:
     max_shifts[0] += max(max_shifts[0], i)
     max_shifts[1] += max(max_shifts[1], j)
 print(max_shifts)
-# stitching_space = init_stitching_space([warp_1, warp_2, warp_3], max_shifts)
-# stitched = image_stitching(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
 
 stitching_space = init_stitching_space(bgrs, max_shifts)
 stitched_linear_blending = image_stitching(stitching_space, warp, all_shifts)
