@@ -4,11 +4,12 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-import pandas as pd
 from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter
 import random
 from scipy import signal
+import os.path as osp
+import os
 
 # filename1 = 'grail1'
 # bgr1 = cv2.imread(f'{filename1}.jpg')
@@ -108,8 +109,7 @@ def calculate_R(gray, ksize=9, S=3, k=0.04):
 
     R = detM - k * (traceM ** 2)
 
-    return R, Ix, Iy, Ix2, Iy2
-
+    return R, Ix, Iy
 # def local_max_R(R, thres=0.01):
 #     print('Calculating local max')
 #     kernels = []
@@ -255,22 +255,44 @@ def get_MSOP_descripters(src_img, feature_pos, Ix, Iy):
 # print(desc_left_list, desc_right_list)
 
 def match_feature(desc_right, desc_left, thresh_hold = 0.8):
-    img1_right_desc = pd.DataFrame(desc_right)
-    img2_left_desc = pd.DataFrame(desc_left)
-    img1_all_right_patches = img1_right_desc.loc[:]["patch"].tolist()
-    img2_all_left_patches = img2_left_desc.loc[:]["patch"].tolist()
-    # print(img1_all_right_patches[0])
+    img1_all_right_patches = []
+    img2_all_left_patches = []
+    for desc in desc_right:
+        img1_all_right_patches.append(desc["patch"])
+    for desc in desc_left:
+        img2_all_left_patches.append(desc["patch"])
     all_combination_dist = cdist(img1_all_right_patches, img2_all_left_patches)
-    sorted_index = np.argsort(all_combination_dist, axis=1)
+    # print("img1_len", len(desc_right))
+    # print("img2_len", len(desc_left))
+    # print("combination shape", all_combination_dist.shape)
+    num_desc_right = len(desc_right)
+    num_desc_left = len(desc_left)
+    all_fs_matches = []
+    for i in range(num_desc_right):
+        first_closest_index = 0
+        second_closest_index = 0
+        first_closest_dist = float("inf")
+        second_closest_dist = float("inf")
+        for j in range(num_desc_left):
+            if all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] < first_closest_dist:
+                second_closest_dist = first_closest_dist
+                second_closest_index = first_closest_index
+                first_closest_dist = all_combination_dist[i, j]
+                first_closest_index = (i, j)
+            elif all_combination_dist[i, j] < second_closest_dist and all_combination_dist[i, j] >= first_closest_dist:
+                second_closest_dist = all_combination_dist[i, j]
+                second_closest_index = (i, j)
+        all_fs_matches.append((first_closest_index, second_closest_index))
     # print(sorted_index)
     # print(len(sorted_index))
     # print(len(sorted_index[0]))
     matched_indexes = []
-    for i, j in enumerate(sorted_index):
-        first_closest = all_combination_dist[i, j[0]]
-        second_closest = all_combination_dist[i, j[1]]
+    for fs in all_fs_matches:
+        # print("fs is", fs)
+        first_closest = all_combination_dist[fs[0][0], fs[0][1]]
+        second_closest = all_combination_dist[fs[1][0], fs[1][1]]
         if first_closest / second_closest < thresh_hold:
-            matched_indexes.append([i, j[0]])
+            matched_indexes.append(fs[0])
     return matched_indexes
 
 # matched_indexes = match_feature(desc_right_list1, desc_left_list2)
@@ -429,225 +451,94 @@ def image_stitching2(stitching_space, images, all_shifts):
         print(f"end {i}")
     return stitching_space.astype(np.uint8)
 
-# def image_stitching3(stitching_space, images, all_shifts):
-#     cumulated_shifts = [0, 0]
-#     cumulated_h, cumulated_w, temp_c = images[0].shape
-#     num_images = len(images)
-#     stitching_space[:images[0].shape[0], :images[0].shape[1],:] = images[0]
-#     overlap_area = []        
-#     overlap_img = []
-#     for i in range(num_images - 1):
-#         # print(i)
-#         cumulated_shifts[0] = cumulated_shifts[0] + all_shifts[i][0]
-#         cumulated_shifts[1] = cumulated_shifts[1] + all_shifts[i][1]
-#         overlapped_col = cumulated_w - cumulated_shifts[1]
-#         left_part = overlapped_col - 1
-#         right_part = 1 
-#         h, w, c = images[i + 1].shape
-#         if cumulated_shifts[0] >= 0:
-#             start_row = cumulated_shifts[0]  
-#             end_row = h + start_row
-#         else:
-#             start_row = 0
-#             end_row = h + cumulated_shifts[0]
+filenames = []
 
-#         if cumulated_shifts[0] >= 0:
-#             im_start_row = 0
-#         else:
-#             im_start_row = -cumulated_shifts[0]
-        
-#         for j in range(cumulated_shifts[1], cumulated_w):
-#             if (j > (cumulated_shifts[1] + cumulated_w) / 2):
-#                 stitching_space[start_row:end_row, (j - 1), :] = images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :]
-#             # else:
-#             #     stitching_space[start_row:end_row, (j - 1), :] = \
-#             #     stitching_space[start_row:end_row, (j - 1), :]
-#             left_part -= 1
-#             right_part += 1
-#         stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
-#         images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
-#         cumulated_h += all_shifts[i][0]
-#         cumulated_w += all_shifts[i][1]
-#         overlap_area.append((start_row,end_row, cumulated_shifts[1], cumulated_w))
-#         overlap_img.append(images[i][])
-#         print(f"end {i}")
+bgrs = []
 
-#     for i in range(num_images - 1):
-#         cumulated_shifts[0] = cumulated_shifts[0] + all_shifts[i][0]
-#         cumulated_shifts[1] = cumulated_shifts[1] + all_shifts[i][1]
-#         print(i, 'shift', cumulated_shifts[0], cumulated_shifts[1])
-#         h, w, c = images[i + 1].shape
-#         if cumulated_shifts[0] >= 0:
-#             start_row = cumulated_shifts[0]  
-#             end_row = h + start_row
-#         else:
-#             start_row = 0
-#             end_row = h + cumulated_shifts[0]
+focals = [3085.73, 3082.65, 3087.25]
+# focals = [3995.11, 3995.59, 3996.06, 3987.76, 3974.09]
+dir = 'pictures'
 
-#         if cumulated_shifts[0] >= 0:
-#             im_start_row = 0
-#         else:
-#             im_start_row = -cumulated_shifts[0]
-        
-#         print('cumulated_w', cumulated_w)
-#         print('concate len', cumulated_shifts[1]+w-cumulated_w)
-#         stitching_space[start_row:end_row, cumulated_shifts[1]+99:cumulated_shifts[1]+w-1, :] = images[i+1][im_start_row:,100:, :]
-#         # for j in range(cumulated_shifts[1], cumulated_w):
-#         #     if (j > (cumulated_shifts[1] + cumulated_w) / 2):
-#         #         stitching_space[start_row:end_row, (j - 1), :] = images[i + 1][im_start_row:, (j - cumulated_shifts[1]), :]
-#             # else:
-#             #     stitching_space[start_row:end_row, (j - 1), :] = \
-#             #     stitching_space[start_row:end_row, (j - 1), :]
-#         # overlap_area.append()
-#         # stitching_space[start_row:end_row, cumulated_w-1:w+cumulated_shifts[1], :] = \
-#         # images[i + 1][im_start_row:, (cumulated_w - cumulated_shifts[1] - 1):, :]
-#         cumulated_h += all_shifts[i][0]
-#         cumulated_w += all_shifts[i][1]
-#         print(f"end {i}")
-#     return stitching_space.astype(np.uint8)
+for filename in np.sort(os.listdir(dir)):
+    if osp.splitext(filename)[1] in ['.png', '.jpg']:
+        print(filename)
+        filenames.append(filename[:-4])
+        im = cv2.imread(osp.join(dir, filename))
+        bgrs.append(im) 
 
+n = 3
 
-# all_shifts = []
-# all_shifts.append(shift_xy)
-# stitching_space = init_stitching_space([warp_1, warp_2], shift_xy)
-# print(stitching_space.shape)
-# stitched = image_stitching(stitching_space, [warp_1, warp_2], all_shifts)
-# cv2.imwrite(f'results/stitched_test.png', stitched)
+print('files')
+for i in range(n):
+    print(filenames[i])
 
-filename1 = "01"
-filename2 = "02"
-filename3 = "03"
+warp = [cylinder_warping2(bgrs[i], filenames[i], focal=focals[i]) for i in range(n)]
 
-bgr1 = cv2.imread(f"{filename1}.jpg")
-bgr2 = cv2.imread(f"{filename2}.jpg")
-bgr3 = cv2.imread(f"{filename3}.jpg")
+grays = []
 
-warp_1 = cylinder_warping2(bgr1, filename1, focal=3085.73) # 776.419
-warp_2 = cylinder_warping2(bgr2, filename2, focal=3082.65) # 776.035
-warp_3 = cylinder_warping2(bgr3, filename3, focal=3087.25) # 777.776
+for i in range(n):
+    grays.append(cv2.cvtColor(bgrs[i], cv2.COLOR_BGR2GRAY).astype(np.float32))
 
-cv2.imwrite(f'results/{filename1}_wrap_test.png', warp_1)
-cv2.imwrite(f'results/{filename2}_wrap_test.png', warp_2)
-cv2.imwrite(f'results/{filename3}_wrap_test.png', warp_3)
+R, Ix, Iy = [], [], []
 
-# gray1 = cv2.cvtColor(warp_1.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-# gray2 = cv2.cvtColor(warp_2.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-# gray3 = cv2.cvtColor(warp_3.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float32)
-
-gray1 = cv2.cvtColor(bgr1, cv2.COLOR_BGR2GRAY).astype(np.float32)
-gray2 = cv2.cvtColor(bgr2, cv2.COLOR_BGR2GRAY).astype(np.float32)
-gray3 = cv2.cvtColor(bgr3, cv2.COLOR_BGR2GRAY).astype(np.float32)
-
-R1, Ix1, Iy1, Ix21, Iy21 = calculate_R(gray1)
-R2, Ix2, Iy2, Ix22, Iy22 = calculate_R(gray2)
-R3, Ix3, Iy3, Ix23, Iy23 = calculate_R(gray3)
+for i in range(n):
+    r, ix, iy = calculate_R(grays[i])
+    R.append(r)
+    Ix.append(ix)
+    Iy.append(iy)
 
 def find_local_max_R(R, rthres=0.01):
-    kernels = []
+
+    localMax = np.zeros(R.shape, dtype=np.uint8)
+    localMax[R > np.max(R) * rthres] = 1
+
     for y in range(3):
         for x in range(3):
-            if x == 1 and y == 1: continue
-            k = np.zeros((3, 3), dtype=np.float32)
-            k[1, 1] = 1
-            k[y, x] = -1
-            kernels.append(k)
-
-    localMax = np.ones(R.shape, dtype=np.uint8)
-    localMax[R <= np.max(R) * rthres] = 0
-
-    for k in kernels:
-        d = np.sign(cv2.filter2D(R, -1, k))
-        d[d < 0] = 0
-        localMax &= np.uint8(d)
-
+            if x == 1 and y == 1:
+                continue
+            kernels = np.zeros((3, 3))
+            kernels[1, 1] = 1
+            kernels[y, x] = -1
+            result = cv2.filter2D(R, -1, kernels)
+            localMax[result < 0] = 0 
     print('# corners:', np.sum(localMax))
     feature_points = np.where(localMax > 0)
     
     return feature_points
 
-fpts1 = find_local_max_R(R1)
-fpts2 = find_local_max_R(R2)
-fpts3 = find_local_max_R(R3)
+fpts = []
 
-############################################
+for i in range(n):
+    fpts.append(find_local_max_R(R[i]))
 
-# h1, w1 = gray1.shape
-# h2, w2 = gray2.shape
+for i in range(n):    
+    img_fpts = np.copy(bgrs[i])
+    for j in range(len(fpts[i][0])):
+        cv2.circle(img_fpts, (fpts[i][1][j], fpts[i][0][j]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
+    cv2.imwrite(f'results/{filenames[i]}_fpts.png', img_fpts)
 
-# img_fps1 = np.copy(bgr1)
-# for i in range(len(fpts1[0])):
-#     cv2.circle(img_fps1, (fpts1[1][i], fpts1[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
+desc_left_list, desc_right_list = [], []
 
-# img_arrows1 = np.copy(bgr1)
-    
-# for i in range(len(fpts1[0])):
-#     x = fpts1[1][i]
-#     y = fpts1[0][i]
-#     ex, ey = int(x + Ix1[y, x]*2), int(y + Iy1[y, x]*2)
-#     ex, ey = np.clip(ex, 0, w1), np.clip(ey, 0, h1)
-#     cv2.arrowedLine(img_arrows1, (x, y), (ex, ey), (0, 0, 255), 1)
-
-# cv2.imwrite(f'results/{filename1}_fps.png', img_fps1)
-# cv2.imwrite(f'results/{filename1}_arrows.png', img_arrows1)
-
-# img_fps2 = np.copy(bgr2)
-# for i in range(len(fpts2[0])):
-#     cv2.circle(img_fps2, (fpts2[1][i], fpts2[0][i]), radius=1, color=[0, 0, 255], thickness=1, lineType=1)
-
-# img_arrows2 = np.copy(bgr2)
-    
-# for i in range(len(fpts2[0])):
-#     x = fpts2[1][i]
-#     y = fpts2[0][i]
-#     ex, ey = int(x + Ix1[y, x]*2), int(y + Iy1[y, x]*2)
-#     ex, ey = np.clip(ex, 0, w1), np.clip(ey, 0, h1)
-#     cv2.arrowedLine(img_arrows2, (x, y), (ex, ey), (0, 0, 255), 1)
-
-# cv2.imwrite(f'results/{filename2}_fps.png', img_fps2)
-# cv2.imwrite(f'results/{filename2}_arrows.png', img_arrows2)
-
-
-############################################
-
-desc_left_list1, desc_right_list1 = get_MSOP_descripters(bgr1, fpts1, Ix1, Iy1)
-desc_left_list2, desc_right_list2 = get_MSOP_descripters(bgr2, fpts2, Ix2, Iy2)
-desc_left_list3, desc_right_list3 = get_MSOP_descripters(bgr3, fpts3, Ix3, Iy3)
-
+for i in range(n):
+    left, right = get_MSOP_descripters(bgrs[i], fpts[i], Ix[i], Iy[i])
+    desc_left_list.append(left)
+    desc_right_list.append(right)
 # desc_left_list1, desc_right_list1 = get_MSOP_descripters(warp_1, fpts1, Ix1, Iy1)
 # desc_left_list2, desc_right_list2 = get_MSOP_descripters(warp_2, fpts2, Ix2, Iy2)
 # desc_left_list3, desc_right_list3 = get_MSOP_descripters(warp_3, fpts3, Ix3, Iy3)
 
-test_height = bgr1.shape[0]
-test_width = bgr1.shape[1]
-warp_feature(test_height, test_width, desc_left_list1, focal=3085.73)
-warp_feature(test_height, test_width, desc_left_list2, focal=3082.65)
-warp_feature(test_height, test_width, desc_left_list3, focal=3087.25)
-warp_feature(test_height, test_width, desc_right_list1, focal=3085.73)
-warp_feature(test_height, test_width, desc_right_list2, focal=3082.65)
-warp_feature(test_height, test_width, desc_right_list3, focal=3087.25)
+test_height = bgrs[0].shape[0]
+test_width = bgrs[0].shape[1]
 
-match_feature12 = match_feature(desc_right_list1, desc_left_list2, thresh_hold=1)
+for i in range(n):
+    warp_feature(test_height, test_width, desc_left_list[i], focals[i])
+    warp_feature(test_height, test_width, desc_right_list[i], focals[i])
+
+matches = []
 all_shifts = []
-all_shifts.append(ransac(desc_right_list1, desc_left_list2, match_feature12))
-###########################################
-img_fps1 = np.copy(warp_1)
-for i in ransac_list:
-    cv2.circle(img_fps1, (desc_right_list1[i[0]]["coordinate"][1], desc_right_list1[i[0]]["coordinate"][0]), radius=5, color=[0, 0, 255], thickness=1, lineType=1)
-cv2.imwrite(f'results/see/{filename1}_fps.png', img_fps1)
-
-img_fps2 = np.copy(warp_2)
-for i in ransac_list:
-    cv2.circle(img_fps2, (desc_left_list2[i[1]]["coordinate"][1], desc_left_list2[i[1]]["coordinate"][0]), radius=5, color=[0, 0, 255], thickness=1, lineType=1)
-cv2.imwrite(f'results/see/{filename2}_fps.png', img_fps2)
-###########################################
-print("len_ransac", len(ransac_list))
-match_feature23 = match_feature(desc_right_list2, desc_left_list3, thresh_hold=1)
-all_shifts.append(ransac(desc_right_list2, desc_left_list3, match_feature23))
-
-# print(match_feature12)
-# print(match_feature23)
-
-
+for i in range(n-1):
+    matches.append(match_feature(desc_right_list[i], desc_left_list[i+1], thresh_hold=1))
+    all_shifts.append(ransac(desc_right_list[i], desc_left_list[i+1], matches[i]))
 print(all_shifts)
 
 max_shifts = [0, 0]
@@ -657,23 +548,12 @@ for i, j in all_shifts:
 print(max_shifts)
 # stitching_space = init_stitching_space([warp_1, warp_2, warp_3], max_shifts)
 # stitched = image_stitching(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
-stitching_space = init_stitching_space([bgr1, bgr2, bgr3], max_shifts)
-stitched = image_stitching2(stitching_space, [warp_1, warp_2, warp_3], all_shifts)
 
-cv2.imwrite(f'results/stitched_test.png', stitched)
-
-def find_range(array):
-    sum_x = np.sum(array, axis=0)
-    sum_y = np.sum(array, axis=1)
-    
-    index_x = np.where(sum_x > 0)[0]
-    sx = index_x[0]
-    ex = index_x[-1] + 1 # slicing
-    index_y = np.where(sum_y > 0)[0]
-    sy = index_y[0]
-    ey = index_y[-1] + 1 # slicing
-    
-    return sx, ex, sy, ey
+stitching_space = init_stitching_space(bgrs, max_shifts)
+stitched_linear_blending = image_stitching(stitching_space, warp, all_shifts)
+stitched_no_blending = image_stitching2(stitching_space, warp, all_shifts)
+cv2.imwrite(f'results/linear_blending.png', stitched_linear_blending)
+cv2.imwrite(f'results/no_blending.png', stitched_no_blending)
 
 def bundle_adjust(img):
     h, w, _ = img.shape
@@ -728,7 +608,7 @@ def bundle_adjust(img):
     return pano_adjust
 
 
-bundle = bundle_adjust(stitched)
+bundle = bundle_adjust(stitched_no_blending)
 
-cv2.imwrite(f'results/bundle.png', bundle)
+cv2.imwrite(f'results/result.png', bundle)
 
