@@ -4,7 +4,6 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import math
-import pandas as pd
 from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter
 import random
